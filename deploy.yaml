@@ -1,0 +1,139 @@
+heat_template_version: rocky
+description:  Symfony
+parameters:
+  image:
+    type: string
+    description: image use for symfony
+    default: Debian 11.4 bullseye
+  key:
+    type: string
+    description: SSH key to connect to the servers
+    default: macbook
+  flavor:
+    type: string
+    description: flavor used by symfony
+    default: a2-ram4-disk50-perf1
+  network:
+    type: string
+    description: network used by symfony
+    default: symfony-network
+  subnet_id:
+    type: string
+    description: dedicated subnet for symfony
+    default: symfony-subnet
+  floating_network_id:
+    type: string
+    description: UUID of a Neutron external network
+    default: ext-floating1
+
+resources:
+  wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: wait_handle }
+      timeout: 600
+
+  wait_handle:
+    type: OS::Heat::WaitConditionHandle
+
+
+
+  # security group
+  symfony_security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: "symfony_security_group"
+      description: >
+        Allows ICMP, SSH, HTTP & HTTPS default port
+      rules:
+         - { direction: ingress, protocol: icmp }
+         - { direction: ingress, protocol: tcp, port_range_min: 22, port_range_max: 22 }
+         - { direction: ingress, protocol: tcp, port_range_min: 8000, port_range_max: 8000 }
+
+  # network resources
+  symfony_network:
+    type: OS::Neutron::Net
+    properties:
+      name: { get_param: network }
+      value_specs:
+        mtu: 1500
+
+  symfony_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: 'symfony-subnet'
+      network_id: { get_resource: symfony_network }
+      cidr: "10.11.3.0/24"
+      dns_nameservers:
+        - "84.16.67.69"
+        - "84.16.67.70"
+      ip_version: 4
+
+  symfony_router:
+    type: OS::Neutron::Router
+    properties:
+      name:  'symfony-router'
+      external_gateway_info: { network: ext-floating1 }
+
+  symfony_router_subnet_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: symfony_router }
+      subnet: { get_resource: symfony_subnet }
+
+  symfony_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_resource: symfony_network }
+      security_groups: [ { get_resource: symfony_security_group } ]
+      fixed_ips:
+        - subnet_id: { get_resource: symfony_subnet }
+
+  symfony_floating:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: floating_network_id }
+      port_id: { get_resource: symfony_port }
+
+  # instance
+  server:
+    type: OS::Nova::Server
+    depends_on: [ symfony_router]
+    properties:
+      flavor: { get_param: flavor }
+      image: { get_param: image }
+      key_name: {get_param: key}
+      networks:
+        - port: { get_resource: symfony_port }
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/bash -v
+            apt update && apt upgrade -y
+            # PHP
+            apt-get install gnupg2 ca-certificates apt-transport-https software-properties-common -y
+            echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/php.list
+            wget -qO - https://packages.sury.org/php/apt.gpg | apt-key add -
+            apt-get update -y
+            apt-get install php libapache2-mod-php php-pear php-cli php-cgi php-common php-mbstring php-zip php-net-socket php-gd php-xml-util php-php-gettext php-mysql php-bcmath unzip wget git -y
+            curl -sS https://getcomposer.org/installer -o composer-setup.php
+            sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+            curl -1sLf 'https://dl.cloudsmith.io/public/symfony/stable/setup.deb.sh' | sudo -E bash
+            sudo apt install symfony-cli
+            #sudo symfony new app
+            #cd app
+            #sudo symfony server:ca:install
+            #sudo symfony server:start -d
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+          params:
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+
+
+outputs:
+  server_IP:
+    value:
+      str_replace:
+        template: Here's the address IP !
+        params:
+          IP: { get_attr: [symfony_floating, floating_ip_address] }
+    description: "IP"
