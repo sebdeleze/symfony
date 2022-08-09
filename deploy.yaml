@@ -1,30 +1,18 @@
 heat_template_version: rocky
-description:  Symfony
+description: App
 parameters:
   image:
     type: string
-    description: image use for symfony
     default: Debian 11.4 bullseye
   key:
     type: string
-    description: SSH key to connect to the servers
     default: macbook
   flavor:
     type: string
-    description: flavor used by symfony
     default: a2-ram4-disk50-perf1
-  network:
+  branch:
     type: string
-    description: network used by symfony
-    default: symfony-network
-  subnet_id:
-    type: string
-    description: dedicated subnet for symfony
-    default: symfony-subnet
-  floating_network_id:
-    type: string
-    description: UUID of a Neutron external network
-    default: ext-floating1
+    default: master
 
 resources:
   wait_condition:
@@ -36,75 +24,28 @@ resources:
   wait_handle:
     type: OS::Heat::WaitConditionHandle
 
-
-
-  # security group
-  symfony_security_group:
-    type: OS::Neutron::SecurityGroup
-    properties:
-      name: "symfony_security_group"
-      description: >
-        Allows ICMP, SSH, HTTP & HTTPS default port
-      rules:
-         - { direction: ingress, protocol: icmp }
-         - { direction: ingress, protocol: tcp, port_range_min: 22, port_range_max: 22 }
-         - { direction: ingress, protocol: tcp, port_range_min: 8000, port_range_max: 8000 }
-
-  # network resources
-  symfony_network:
-    type: OS::Neutron::Net
-    properties:
-      name: { get_param: network }
-      value_specs:
-        mtu: 1500
-
-  symfony_subnet:
-    type: OS::Neutron::Subnet
-    properties:
-      name: 'symfony-subnet'
-      network_id: { get_resource: symfony_network }
-      cidr: "10.11.3.0/24"
-      dns_nameservers:
-        - "84.16.67.69"
-        - "84.16.67.70"
-      ip_version: 4
-
-  symfony_router:
-    type: OS::Neutron::Router
-    properties:
-      name:  'symfony-router'
-      external_gateway_info: { network: ext-floating1 }
-
-  symfony_router_subnet_interface:
-    type: OS::Neutron::RouterInterface
-    properties:
-      router_id: { get_resource: symfony_router }
-      subnet: { get_resource: symfony_subnet }
-
-  symfony_port:
+  port:
     type: OS::Neutron::Port
     properties:
-      network: { get_resource: symfony_network }
-      security_groups: [ { get_resource: symfony_security_group } ]
+      network: base-network
+      security_groups: [ base-security-group ]
       fixed_ips:
-        - subnet_id: { get_resource: symfony_subnet }
+        - subnet_id: base-subnet
 
-  symfony_floating:
+  floating:
     type: OS::Neutron::FloatingIP
     properties:
-      floating_network_id: { get_param: floating_network_id }
-      port_id: { get_resource: symfony_port }
+      floating_network: ext-floating1
+      port_id: { get_resource: port }
 
-  # instance
   server:
     type: OS::Nova::Server
-    depends_on: [ symfony_router]
     properties:
       flavor: { get_param: flavor }
       image: { get_param: image }
-      key_name: {get_param: key}
+      key_name: { get_param: key }
       networks:
-        - port: { get_resource: symfony_port }
+        - port: { get_resource: port }
       user_data:
         str_replace:
           template: |
@@ -135,6 +76,7 @@ resources:
             apt install symfony-cli
             # App
             git clone https://github.com/sebdeleze/symfony.git app
+            git checkout $branch
             cd app
             git checkout $branch
             tee -a .env.local > /dev/null <<EOT
@@ -152,12 +94,38 @@ resources:
             wc_notify --data-binary '{"status": "SUCCESS"}'
           params:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+            $branch: { get_param: branch }
+  
+  # db:
+  #   type: OS::Nova::Server
+  #   properties:
+  #     flavor: { get_param: flavor }
+  #     image: { get_param: image }
+  #     key_name: { get_param: key }
+  #     networks:
+  #       - network: base-network
+  #     user_data:
+  #       str_replace:
+  #         template: |
+  #           #!/bin/bash -v
+  #           apt update && apt upgrade -y
+  #           # MariaDB
+  #           apt install mariadb-server mariadb-client -y
+  #           sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
+  #           systemctl start mariadb
+  #           systemctl enable mariadb
+  #           mysqladmin -u root password root
+  #           # Success
+  #           wc_notify --data-binary '{"status": "SUCCESS"}'
+  #         params:
+  #           wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+  #           $branch: { get_param: branch }
 
 outputs:
   server_IP:
     value:
       str_replace:
-        template: Here's the address IP !
+        template: Here's the address IP IP_ADDRESS !
         params:
-          IP: { get_attr: [symfony_floating, floating_ip_address] }
-    description: "IP"
+          IP_ADDRESS: { get_attr: [floating, floating_ip_address] }
+    description: IP
