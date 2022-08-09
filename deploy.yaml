@@ -110,24 +110,47 @@ resources:
           template: |
             #!/bin/bash -v
             apt update && apt upgrade -y
+            curl -sL https://deb.nodesource.com/setup_14.x | sudo bash -
+            apt install nodejs -y
+            npm install --global yarn
+            # MariaDB
+            apt install mariadb-server mariadb-client -y
+            sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
+            systemctl start mariadb
+            systemctl enable mariadb
+            mysqladmin -u root password root
             # PHP
-            apt-get install gnupg2 ca-certificates apt-transport-https software-properties-common -y
+            apt install gnupg2 ca-certificates apt-transport-https software-properties-common -y
             echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/php.list
             wget -qO - https://packages.sury.org/php/apt.gpg | apt-key add -
-            apt-get update -y
-            apt-get install php libapache2-mod-php php-pear php-cli php-cgi php-common php-mbstring php-zip php-net-socket php-gd php-xml-util php-php-gettext php-mysql php-bcmath unzip wget git -y
+            apt update -y
+            apt install php libapache2-mod-php php-pear php-cli php-cgi php-common php-mbstring php-zip php-net-socket php-gd php-xml-util php-php-gettext php-mysql php-bcmath unzip wget git -y
+            # Composer
             curl -sS https://getcomposer.org/installer -o composer-setup.php
             sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+            rm composer-setup.php
+            export COMPOSER_HOME=/home/debian
+            # Symfony CLI
             curl -1sLf 'https://dl.cloudsmith.io/public/symfony/stable/setup.deb.sh' | sudo -E bash
-            sudo apt install symfony-cli
-            #sudo symfony new app
-            #cd app
-            #sudo symfony server:ca:install
-            #sudo symfony server:start -d
+            apt install symfony-cli
+            # App
+            git clone https://github.com/sebdeleze/symfony.git app
+            cd app
+            tee -a .env.local > /dev/null <<EOT
+            APP_ENV=prod
+            DATABASE_URL="mysql://root:root@127.0.0.1:3306/symfony?serverVersion=mariadb-1.5.15&charset=utf8mb4"
+            EOT
+            composer install --no-interaction
+            yarn install
+            yarn build
+            bin/console doctrine:database:create
+            bin/console doctrine:migrations:migrate --no-interaction
+            symfony server:ca:install
+            symfony server:start -d
+            # Success
             wc_notify --data-binary '{"status": "SUCCESS"}'
           params:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
-
 
 outputs:
   server_IP:
