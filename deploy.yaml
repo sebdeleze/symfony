@@ -136,6 +136,7 @@ resources:
             # App
             git clone https://github.com/sebdeleze/symfony.git app
             cd app
+            git checkout $branch
             tee -a .env.local > /dev/null <<EOT
             APP_ENV=prod
             DATABASE_URL="mysql://root:root@127.0.0.1:3306/symfony?serverVersion=mariadb-1.5.15&charset=utf8mb4"
