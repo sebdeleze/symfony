@@ -1,131 +1,182 @@
 heat_template_version: rocky
 description: App
 parameters:
-  image:
-    type: string
-    default: Debian 11.4 bullseye
-  key:
-    type: string
-    default: macbook
-  flavor:
-    type: string
-    default: a2-ram4-disk50-perf1
-  branch:
-    type: string
-    default: master
+    image:
+        type: string
+        default: Debian 11.4 bullseye
+    key:
+        type: string
+        default: macbook
+    flavor:
+        type: string
+        default: a2-ram4-disk50-perf1
+    branch:
+        type: string
+        default: master
+    es_password:
+        type: string
+        default: testtest
 
 resources:
-  wait_condition:
-    type: OS::Heat::WaitCondition
-    properties:
-      handle: { get_resource: wait_handle }
-      timeout: 600
+    wait_condition:
+        type: OS::Heat::WaitCondition
+        properties:
+            handle: { get_resource: wait_handle }
+            timeout: 600
 
-  wait_handle:
-    type: OS::Heat::WaitConditionHandle
+    wait_handle:
+        type: OS::Heat::WaitConditionHandle
 
-  port:
-    type: OS::Neutron::Port
-    properties:
-      network: base-network
-      security_groups: [ base-security-group ]
-      fixed_ips:
-        - subnet_id: base-subnet
+    floating_app:
+        type: OS::Neutron::FloatingIP
+        depends_on: [ server ]
+        properties:
+            floating_network: ext-floating1
+            port_id: { get_attr: [ server, addresses, base-network, 0, port] }
+    
+    floating_es:
+        type: OS::Neutron::FloatingIP
+        depends_on: [ es ]
+        properties:
+            floating_network: ext-floating1
+            port_id: { get_attr: [ es, addresses, base-network, 0, port] }
 
-  floating:
-    type: OS::Neutron::FloatingIP
-    properties:
-      floating_network: ext-floating1
-      port_id: { get_resource: port }
+    server:
+        type: OS::Nova::Server
+        properties:
+            flavor: { get_param: flavor }
+            image: { get_param: image }
+            key_name: { get_param: key }
+            depends_on: [ es ]
+            security_groups: [ default, symfony ]
+            networks:
+                - network: base-network
+            user_data:
+                str_replace:
+                    template: |
+                        #!/bin/bash -v
+                        apt update && apt upgrade -y
+                        curl -sL https://deb.nodesource.com/setup_14.x | sudo bash -
+                        apt install nodejs -y
+                        npm install --global yarn
+                        # MariaDB
+                        apt install mariadb-server mariadb-client -y
+                        sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
+                        systemctl start mariadb
+                        systemctl enable mariadb
+                        mysqladmin -u root password root
+                        # PHP
+                        apt install gnupg2 ca-certificates apt-transport-https software-properties-common -y
+                        echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/php.list
+                        wget -qO - https://packages.sury.org/php/apt.gpg | apt-key add -
+                        apt update -y
+                        apt install php libapache2-mod-php php-pear php-cli php-cgi php-common php-mbstring php-zip php-net-socket php-gd php-xml-util php-php-gettext php-mysql php-bcmath unzip wget git -y
+                        # Composer
+                        curl -sS https://getcomposer.org/installer -o composer-setup.php
+                        sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+                        rm composer-setup.php
+                        export COMPOSER_HOME=/home/debian
+                        # Symfony CLI
+                        curl -1sLf 'https://dl.cloudsmith.io/public/symfony/stable/setup.deb.sh' | sudo -E bash
+                        apt install symfony-cli
+                        # App
+                        git clone https://github.com/sebdeleze/symfony.git app
+                        git checkout $branch
+                        cd app
+                        git checkout $branch
+                        tee -a .env.local > /dev/null <<EOT
+                        APP_ENV=prod
+                        DATABASE_URL="mysql://root:root@127.0.0.1:3306/symfony?serverVersion=mariadb-1.5.15&charset=utf8mb4"
+                        ELASTICSEARCH_HOST=https://user:$es_password@$es_private_ip:9200
+                        EOT
+                        composer install --no-interaction
+                        yarn install
+                        yarn build
+                        bin/console doctrine:database:create
+                        bin/console doctrine:migrations:migrate --no-interaction
+                        symfony server:ca:install
+                        symfony server:start -d
+                        # Success
+                        wc_notify --data-binary '{"status": "SUCCESS"}'
+                    params:
+                        wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+                        $branch: { get_param: branch }
+                        $es_private_ip: { get_attr: [es, networks, base-network, 0] }
+                        $es_password: { get_param: es_password }
 
-  server:
-    type: OS::Nova::Server
-    properties:
-      flavor: { get_param: flavor }
-      image: { get_param: image }
-      key_name: { get_param: key }
-      networks:
-        - port: { get_resource: port }
-      user_data:
-        str_replace:
-          template: |
-            #!/bin/bash -v
-            apt update && apt upgrade -y
-            curl -sL https://deb.nodesource.com/setup_14.x | sudo bash -
-            apt install nodejs -y
-            npm install --global yarn
-            # MariaDB
-            apt install mariadb-server mariadb-client -y
-            sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
-            systemctl start mariadb
-            systemctl enable mariadb
-            mysqladmin -u root password root
-            # PHP
-            apt install gnupg2 ca-certificates apt-transport-https software-properties-common -y
-            echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/php.list
-            wget -qO - https://packages.sury.org/php/apt.gpg | apt-key add -
-            apt update -y
-            apt install php libapache2-mod-php php-pear php-cli php-cgi php-common php-mbstring php-zip php-net-socket php-gd php-xml-util php-php-gettext php-mysql php-bcmath unzip wget git -y
-            # Composer
-            curl -sS https://getcomposer.org/installer -o composer-setup.php
-            sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
-            rm composer-setup.php
-            export COMPOSER_HOME=/home/debian
-            # Symfony CLI
-            curl -1sLf 'https://dl.cloudsmith.io/public/symfony/stable/setup.deb.sh' | sudo -E bash
-            apt install symfony-cli
-            # App
-            git clone https://github.com/sebdeleze/symfony.git app
-            git checkout $branch
-            cd app
-            git checkout $branch
-            tee -a .env.local > /dev/null <<EOT
-            APP_ENV=prod
-            DATABASE_URL="mysql://root:root@127.0.0.1:3306/symfony?serverVersion=mariadb-1.5.15&charset=utf8mb4"
-            EOT
-            composer install --no-interaction
-            yarn install
-            yarn build
-            bin/console doctrine:database:create
-            bin/console doctrine:migrations:migrate --no-interaction
-            symfony server:ca:install
-            symfony server:start -d
-            # Success
-            wc_notify --data-binary '{"status": "SUCCESS"}'
-          params:
-            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
-            $branch: { get_param: branch }
-  
-  # db:
-  #   type: OS::Nova::Server
-  #   properties:
-  #     flavor: { get_param: flavor }
-  #     image: { get_param: image }
-  #     key_name: { get_param: key }
-  #     networks:
-  #       - network: base-network
-  #     user_data:
-  #       str_replace:
-  #         template: |
-  #           #!/bin/bash -v
-  #           apt update && apt upgrade -y
-  #           # MariaDB
-  #           apt install mariadb-server mariadb-client -y
-  #           sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
-  #           systemctl start mariadb
-  #           systemctl enable mariadb
-  #           mysqladmin -u root password root
-  #           # Success
-  #           wc_notify --data-binary '{"status": "SUCCESS"}'
-  #         params:
-  #           wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
-  #           $branch: { get_param: branch }
+    # db:
+    #   type: OS::Nova::Server
+    #   properties:
+    #     flavor: { get_param: flavor }
+    #     image: { get_param: image }
+    #     key_name: { get_param: key }
+    #     networks:
+    #       - network: base-network
+    #     user_data:
+    #       str_replace:
+    #         template: |
+    #           #!/bin/bash -v
+    #           apt update && apt upgrade -y
+    #           # MariaDB
+    #           apt install mariadb-server mariadb-client -y
+    #           sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
+    #           systemctl start mariadb
+    #           systemctl enable mariadb
+    #           mysqladmin -u root password root
+    #           # Success
+    #           wc_notify --data-binary '{"status": "SUCCESS"}'
+    #         params:
+    #           wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+
+    es:
+        type: OS::Nova::Server
+        properties:
+            flavor: { get_param: flavor }
+            image: { get_param: image }
+            key_name: { get_param: key }
+            networks:
+                - network: base-network
+            security_groups: [ default, es ]
+            user_data:
+                str_replace:
+                    template: |
+                        #!/bin/bash -v
+                        apt update && apt upgrade -y
+                        apt install gnupg2 -y
+                        wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+                        apt install apt-transport-https -y
+                        echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" | tee /etc/apt/sources.list.d/elastic-8.x.list
+                        apt update && apt install elasticsearch -y
+                        /usr/share/elasticsearch/bin/elasticsearch-users useradd user -p $password -r superuser
+                        systemctl start elasticsearch.service
+                        # Success
+                        wc_notify --data-binary '{"status": "SUCCESS"}'
+                    params:
+                        wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+                        $password: { get_param: es_password }
 
 outputs:
-  server_IP:
-    value:
-      str_replace:
-        template: Here's the address IP IP_ADDRESS !
-        params:
-          IP_ADDRESS: { get_attr: [floating, floating_ip_address] }
-    description: IP
+    app_private_ip:
+        value:
+            str_replace:
+                template: PRIVATE_IP
+                params:
+                    PRIVATE_IP: { get_attr: [server, networks, base-network, 0] }
+    es_private_ip:
+        value:
+            str_replace:
+                template: PRIVATE_IP
+                params:
+                    PRIVATE_IP: { get_attr: [es, networks, base-network, 0] }
+    app_ip:
+        value:
+            str_replace:
+                template: IP_ADDRESS
+                params:
+                    IP_ADDRESS: { get_attr: [floating_app, floating_ip_address] }
+    es_ip:
+        value:
+            str_replace:
+                template: IP_ADDRESS
+                params:
+                    IP_ADDRESS: { get_attr: [floating_es, floating_ip_address] }

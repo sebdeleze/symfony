@@ -6,15 +6,25 @@ use App\Repository\TodoRepository;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 class DefaultController extends AbstractController
 {
     /**
      * @Route("/")
      */
-    public function index(): Response
+    public function index(HttpClientInterface $client): Response
     {
-        return $this->render('default/index.html.twig');
+        $response = $client->request(
+            'GET',
+            'https://user:testtest@195.15.245.117:9200/', 
+            [
+                'verify_host' => false,
+                'verify_peer' => false,
+            ]
+        );
+        
+        return $this->render('default/index.html.twig', [ 'es' => $response->getContent() ]);
     }
 
     /**
