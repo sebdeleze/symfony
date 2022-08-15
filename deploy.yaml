@@ -43,11 +43,11 @@ resources:
 
     server:
         type: OS::Nova::Server
+        depends_on: [ es ]
         properties:
             flavor: { get_param: flavor }
             image: { get_param: image }
             key_name: { get_param: key }
-            depends_on: [ es ]
             security_groups: [ default, symfony ]
             networks:
                 - network: base-network
@@ -86,7 +86,7 @@ resources:
                         git checkout $branch
                         tee -a .env.local > /dev/null <<EOT
                         APP_ENV=prod
-                        DATABASE_URL="mysql://root:root@127.0.0.1:3306/symfony?serverVersion=mariadb-1.5.15&charset=utf8mb4"
+                        DATABASE_URL="mysql://root:root@127.0.0.1:3306/symfony?serverVersion=mariadb-10.5.15&charset=utf8mb4"
                         ELASTICSEARCH_HOST=https://user:$es_password@$es_private_ip:9200
                         EOT
                         composer install --no-interaction

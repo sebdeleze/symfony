@@ -13,11 +13,11 @@ class DefaultController extends AbstractController
     /**
      * @Route("/")
      */
-    public function index(HttpClientInterface $client): Response
+    public function index(HttpClientInterface $client, string $elasticSearchHost): Response
     {
         $response = $client->request(
             'GET',
-            'https://user:testtest@195.15.245.117:9200/', 
+            $elasticSearchHost, 
             [
                 'verify_host' => false,
                 'verify_peer' => false,
