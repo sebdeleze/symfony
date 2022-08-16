@@ -13,7 +13,16 @@ parameters:
     branch:
         type: string
         default: master
+    es_username:
+        type: string
+        default: app
     es_password:
+        type: string
+        default: testtest
+    db_username:
+        type: string
+        default: app
+    db_password:
         type: string
         default: testtest
 
@@ -29,26 +38,33 @@ resources:
 
     floating_app:
         type: OS::Neutron::FloatingIP
-        depends_on: [ server ]
+        depends_on: [server]
         properties:
             floating_network: ext-floating1
-            port_id: { get_attr: [ server, addresses, base-network, 0, port] }
-    
+            port_id: { get_attr: [server, addresses, base-network, 0, port] }
+
     floating_es:
         type: OS::Neutron::FloatingIP
-        depends_on: [ es ]
+        depends_on: [es]
         properties:
             floating_network: ext-floating1
-            port_id: { get_attr: [ es, addresses, base-network, 0, port] }
+            port_id: { get_attr: [es, addresses, base-network, 0, port] }
+
+    floating_db:
+        type: OS::Neutron::FloatingIP
+        depends_on: [db]
+        properties:
+            floating_network: ext-floating1
+            port_id: { get_attr: [db, addresses, base-network, 0, port] }
 
     server:
         type: OS::Nova::Server
-        depends_on: [ es ]
+        depends_on: [es, db]
         properties:
             flavor: { get_param: flavor }
             image: { get_param: image }
             key_name: { get_param: key }
-            security_groups: [ default, symfony ]
+            security_groups: [default, symfony]
             networks:
                 - network: base-network
             user_data:
@@ -59,12 +75,12 @@ resources:
                         curl -sL https://deb.nodesource.com/setup_14.x | sudo bash -
                         apt install nodejs -y
                         npm install --global yarn
-                        # MariaDB
-                        apt install mariadb-server mariadb-client -y
-                        sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
-                        systemctl start mariadb
-                        systemctl enable mariadb
-                        mysqladmin -u root password root
+                        # # MariaDB
+                        # apt install mariadb-server mariadb-client -y
+                        # sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
+                        # systemctl start mariadb
+                        # systemctl enable mariadb
+                        # mysqladmin -u root password root
                         # PHP
                         apt install gnupg2 ca-certificates apt-transport-https software-properties-common -y
                         echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/php.list
@@ -86,8 +102,8 @@ resources:
                         git checkout $branch
                         tee -a .env.local > /dev/null <<EOT
                         APP_ENV=prod
-                        DATABASE_URL="mysql://root:root@127.0.0.1:3306/symfony?serverVersion=mariadb-10.5.15&charset=utf8mb4"
-                        ELASTICSEARCH_HOST=https://user:$es_password@$es_private_ip:9200
+                        DATABASE_URL="mysql://$db_username:$db_password@$db_private_ip:3306/symfony?serverVersion=mariadb-10.5.15&charset=utf8mb4"
+                        ELASTICSEARCH_HOST=https://$es_username:$es_password@$es_private_ip:9200
                         EOT
                         composer install --no-interaction
                         yarn install
@@ -102,31 +118,44 @@ resources:
                         wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
                         $branch: { get_param: branch }
                         $es_private_ip: { get_attr: [es, networks, base-network, 0] }
+                        $es_username: { get_param: es_username }
                         $es_password: { get_param: es_password }
+                        $db_private_ip: { get_attr: [db, networks, base-network, 0] }
+                        $db_username: { get_param: db_username }
+                        $db_password: { get_param: db_password }
 
-    # db:
-    #   type: OS::Nova::Server
-    #   properties:
-    #     flavor: { get_param: flavor }
-    #     image: { get_param: image }
-    #     key_name: { get_param: key }
-    #     networks:
-    #       - network: base-network
-    #     user_data:
-    #       str_replace:
-    #         template: |
-    #           #!/bin/bash -v
-    #           apt update && apt upgrade -y
-    #           # MariaDB
-    #           apt install mariadb-server mariadb-client -y
-    #           sed -i s/127.0.0.1/0.0.0.0/ /etc/mysql/mariadb.conf.d/50-server.cnf
-    #           systemctl start mariadb
-    #           systemctl enable mariadb
-    #           mysqladmin -u root password root
-    #           # Success
-    #           wc_notify --data-binary '{"status": "SUCCESS"}'
-    #         params:
-    #           wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+    db:
+        type: OS::Nova::Server
+        properties:
+            flavor: { get_param: flavor }
+            image: { get_param: image }
+            key_name: { get_param: key }
+            security_groups: [default, db]
+            networks:
+                - network: base-network
+            user_data:
+                str_replace:
+                    template: |
+                        #!/bin/bash -v
+                        apt update && apt upgrade -y
+                        # MariaDB
+                        apt install mariadb-server mariadb-client -y
+                        sed -i -e 's/^bind-address/#&/' /etc/mysql/mariadb.conf.d/50-server.cnf
+                        systemctl start mariadb
+                        mysqladmin -u root password root
+                        cat << EOF | mysql -u root --password=db_rootpassword
+                        CREATE USER '$db_username'@'%' IDENTIFIED BY '$db_password';
+                        GRANT ALL PRIVILEGES ON *.* TO '$db_username'@'%' WITH GRANT OPTION;
+                        FLUSH PRIVILEGES;
+                        EXIT
+                        EOF
+                        systemctl restart mariadb
+                        # Success
+                        wc_notify --data-binary '{"status": "SUCCESS"}'
+                    params:
+                        wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+                        $db_username: { get_param: db_username }
+                        $db_password: { get_param: db_password }
 
     es:
         type: OS::Nova::Server
@@ -134,9 +163,9 @@ resources:
             flavor: { get_param: flavor }
             image: { get_param: image }
             key_name: { get_param: key }
+            security_groups: [default, es]
             networks:
                 - network: base-network
-            security_groups: [ default, es ]
             user_data:
                 str_replace:
                     template: |
@@ -147,12 +176,13 @@ resources:
                         apt install apt-transport-https -y
                         echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" | tee /etc/apt/sources.list.d/elastic-8.x.list
                         apt update && apt install elasticsearch -y
-                        /usr/share/elasticsearch/bin/elasticsearch-users useradd user -p $password -r superuser
+                        /usr/share/elasticsearch/bin/elasticsearch-users useradd $username -p $password -r superuser
                         systemctl start elasticsearch.service
                         # Success
                         wc_notify --data-binary '{"status": "SUCCESS"}'
                     params:
                         wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+                        $username: { get_param: es_username }
                         $password: { get_param: es_password }
 
 outputs:
@@ -168,6 +198,12 @@ outputs:
                 template: PRIVATE_IP
                 params:
                     PRIVATE_IP: { get_attr: [es, networks, base-network, 0] }
+    db_private_ip:
+        value:
+            str_replace:
+                template: PRIVATE_IP
+                params:
+                    PRIVATE_IP: { get_attr: [db, networks, base-network, 0] }
     app_ip:
         value:
             str_replace:
@@ -180,3 +216,9 @@ outputs:
                 template: IP_ADDRESS
                 params:
                     IP_ADDRESS: { get_attr: [floating_es, floating_ip_address] }
+    db_ip:
+        value:
+            str_replace:
+                template: IP_ADDRESS
+                params:
+                    IP_ADDRESS: { get_attr: [floating_db, floating_ip_address] }
