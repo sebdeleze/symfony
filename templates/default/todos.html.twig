@@ -5,7 +5,9 @@ TODOs list{%- endblock %}{% block body %}
 <div class="container p-5">
     <h1>TODOs list</h1>
     <div class="my-3">
-        <a href="{{ path('app_default_index') }}" class="btn btn-primary">&laquo; Back to homepage</a>
+        <div {{ vue_component('Button', { text: 'Back to homepage', outline: true, link: path('app_default_index') } ) }}>
+            Loading...
+        </div>
     </div>
     <div class="list-group">
         {% for todo in todos %}

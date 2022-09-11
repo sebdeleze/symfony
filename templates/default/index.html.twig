@@ -1,19 +1,19 @@
 {% extends 'base.html.twig' %}
 
-{% block title -%}Homepage{%- endblock %}
-
-{% block body %}
+{% block title -%}Homepage{%- endblock %}{% block body %}
 <div class="container p-5">
     <h1>Test website.</h1>
+    <div class="alert alert-danger" data-controller="hello"></div>
     <div class="card border-primary text-primary my-3">
         <div class="card-body">
             This is a test website for deployment to Infomaniak public cloud
         </div>
     </div>
     <div class="my-3">
-        <a href="{{ path('app_default_todos') }}" class="btn btn-primary">See TODOs</a>
+        <div {{ vue_component('Button', { text: 'See TODOs', type: 'warning', link: path('app_default_todos') } ) }}>
+            Loading...
+        </div>
     </div>
     <h2 class="mt-4">Response from ES</h2>
     <pre>{{ es }}</pre>
-</div>
-{% endblock %}
+</div>{% endblock %}
