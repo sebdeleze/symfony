@@ -3,7 +3,6 @@
 {% block title -%}Homepage{%- endblock %}{% block body %}
 <div class="container p-5">
     <h1>Test website.</h1>
-    <div class="alert alert-danger" data-controller="hello"></div>
     <div class="card border-primary text-primary my-3">
         <div class="card-body">
             This is a test website for deployment to Infomaniak public cloud
@@ -16,4 +15,14 @@
     </div>
     <h2 class="mt-4">Response from ES</h2>
     <pre>{{ es }}</pre>
+
+    <div data-controller="hello">
+        <div class="d-flex">
+            <input class="form-control me-4" data-hello-target="name" type="text">
+            <button class="btn btn-primary" data-action="click->hello#greet">
+                Greet
+            </button>
+        </div>
+        <div class="alert alert-info mt-2" data-hello-target="output"></div>
+    </div>
 </div>{% endblock %}

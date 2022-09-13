@@ -3,7 +3,7 @@
     :href="link"
     :class="'btn btn' + this.outlineClass + '-' + type"
     @click="loading"
-    >{{ text }}</a
+    >{{ textValue }}</a
   >
 </template>
 
@@ -28,7 +28,7 @@ export default {
   },
   data() {
     return {
-      text: this.text,
+      textValue: this.text,
     };
   },
   computed: {
@@ -38,7 +38,7 @@ export default {
   },
   methods: {
     loading() {
-      this.text = "Loading...";
+      this.textValue = "Loading...";
     },
   },
 };

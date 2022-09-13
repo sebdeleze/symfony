@@ -1,0 +1,16 @@
+<div{{attributes}}>
+    <input type="text" class="form-control my-2" value="{{ query }}" placeholder="Search..." data-model="query" data-action="live#update">
+
+    {% if this.todos|length > 0 %}
+        <div class="list-group" data-loading="addClass(opacity-50)">
+            {% for todo in this.todos %}
+                <div class="list-group-item list-group-item-action py-3">
+                    <h5 class="mb-1">{{ todo.title }}</h5>
+                    <p class="mb-1">{{ todo.description }}</p>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="alert alert-info">No packages found matching "{{ query }}"</div>
+    {% endif %}
+</div
