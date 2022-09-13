@@ -3,7 +3,7 @@ description: App
 parameters:
     image:
         type: string
-        default: Debian 11.4 bullseye
+        default: Debian 11.5 bullseye
     key:
         type: string
         default: macbook
